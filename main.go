@@ -78,23 +78,6 @@ func main() {
 	)
 	s.AddTool(generateEchartsPage, GenerateEchartsPage)
 
-	// 使用 SSE Server，配置更多选项
-	sseServer := server.NewSSEServer(
-		s,
-		server.WithUseFullURLForMessageEndpoint(true),
-		server.WithMessageEndpoint("/message"),
-		server.WithSSEEndpoint("/sse"),
-		server.WithKeepAlive(true),
-		server.WithKeepAliveInterval(15*time.Second),
-	)
-
-	// 创建路由
-	mux := http.NewServeMux()
-
-	// 注册 SSE 和 message 处理器
-	mux.Handle("/sse", sseServer.SSEHandler())
-	mux.Handle("/message", sseServer.MessageHandler())
-
 	// 确保静态文件目录存在
 	staticDir := getEnv("STATIC_DIR", "static")
 	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
@@ -103,20 +86,40 @@ func main() {
 		}
 	}
 
-	mux.Handle("/", http.FileServer(http.Dir(staticDir))) // 提供静态文件服务
+	// 获取端口配置
+	mcpPort := getEnv("PORT", "8989")
+	staticPort := getEnv("STATIC_PORT", "8988")
 
-	// 创建 HTTP 服务器
-	port := getEnv("PORT", "8989")
-	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: mux,
+	// 创建 MCP HTTP 服务器
+	httpServer := server.NewStreamableHTTPServer(s,
+		server.WithEndpointPath("/mcp"),
+		server.WithSessionIdManager(&server.InsecureStatefulSessionIdManager{}),
+		server.WithHeartbeatInterval(5*time.Second),
+		server.WithLogger(log.StandardLogger()),
+	)
+
+	// 创建静态文件服务器
+	staticMux := http.NewServeMux()
+	staticMux.Handle("/", http.FileServer(http.Dir(staticDir)))
+
+	staticSrv := &http.Server{
+		Addr:    ":" + staticPort,
+		Handler: staticMux,
 	}
 
-	// 在单独的 goroutine 中启动服务器
+	// 启动 MCP 服务器
 	go func() {
-		log.Infof("HTTP 服务器正在启动，监听端口: %s", port)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("HTTP 服务器启动失败: %v\n", err)
+		log.Infof("MCP 服务器正在启动，监听端口: %s", mcpPort)
+		if err := httpServer.Start(":" + mcpPort); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("MCP 服务器启动失败: %v\n", err)
+		}
+	}()
+
+	// 启动静态文件服务器
+	go func() {
+		log.Infof("静态文件服务器正在启动，监听端口: %s", staticPort)
+		if err := staticSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("静态文件服务器启动失败: %v\n", err)
 		}
 	}()
 
@@ -131,14 +134,14 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// 优雅关闭 SSE 服务器
-	if err := sseServer.Shutdown(ctx); err != nil {
-		log.Fatalf("SSE 服务器关闭错误: %v", err)
+	// 优雅关闭 MCP 服务器
+	if err := httpServer.Shutdown(ctx); err != nil {
+		log.Fatalf("MCP 服务器关闭错误: %v", err)
 	}
 
-	// 优雅关闭 HTTP 服务器
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("HTTP 服务器关闭错误: %v", err)
+	// 优雅关闭静态文件服务器
+	if err := staticSrv.Shutdown(ctx); err != nil {
+		log.Fatalf("静态文件服务器关闭错误: %v", err)
 	}
 
 	log.Info("服务器已成功关闭")
@@ -209,8 +212,8 @@ func GenerateEchartsPage(ctx context.Context, request mcp.CallToolRequest) (*mcp
 	}
 
 	// 返回结果 URL
-	port := getEnv("PORT", "8989")
-	publicURL := getEnv("PUBLIC_URL", fmt.Sprintf("http://localhost:%s", port))
+	staticPort := getEnv("STATIC_PORT", "8988")
+	publicURL := getEnv("PUBLIC_URL", fmt.Sprintf("http://localhost:%s", staticPort))
 	// 确保 publicURL 没有尾部斜杠
 	publicURL = strings.TrimSuffix(publicURL, "/")
 
