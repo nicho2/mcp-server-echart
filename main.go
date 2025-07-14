@@ -87,39 +87,36 @@ func main() {
 	}
 
 	// 获取端口配置
-	mcpPort := getEnv("PORT", "8989")
-	staticPort := getEnv("STATIC_PORT", "8988")
+	port := getEnv("PORT", "8989")
 
+	// 创建统一的 HTTP 路由器
+	mux := http.NewServeMux()
+	
+	// 添加静态文件服务器
+	mux.Handle("/", http.FileServer(http.Dir(staticDir)))
+	
 	// 创建 MCP HTTP 服务器
-	httpServer := server.NewStreamableHTTPServer(s,
+	mcpHandler := server.NewStreamableHTTPServer(s,
 		server.WithEndpointPath("/mcp"),
 		server.WithSessionIdManager(&server.InsecureStatefulSessionIdManager{}),
 		server.WithHeartbeatInterval(5*time.Second),
 		server.WithLogger(log.StandardLogger()),
 	)
+	
+	// 添加 MCP 处理器到路由器
+	mux.Handle("/mcp", mcpHandler)
 
-	// 创建静态文件服务器
-	staticMux := http.NewServeMux()
-	staticMux.Handle("/", http.FileServer(http.Dir(staticDir)))
-
-	staticSrv := &http.Server{
-		Addr:    ":" + staticPort,
-		Handler: staticMux,
+	// 创建统一的 HTTP 服务器
+	httpServer := &http.Server{
+		Addr:    ":" + port,
+		Handler: mux,
 	}
 
-	// 启动 MCP 服务器
+	// 启动统一的 HTTP 服务器
 	go func() {
-		log.Infof("MCP 服务器正在启动，监听端口: %s", mcpPort)
-		if err := httpServer.Start(":" + mcpPort); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("MCP 服务器启动失败: %v\n", err)
-		}
-	}()
-
-	// 启动静态文件服务器
-	go func() {
-		log.Infof("静态文件服务器正在启动，监听端口: %s", staticPort)
-		if err := staticSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("静态文件服务器启动失败: %v\n", err)
+		log.Infof("服务器正在启动，监听端口: %s (MCP协议: /mcp, 静态文件: /)", port)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("服务器启动失败: %v\n", err)
 		}
 	}()
 
@@ -134,14 +131,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// 优雅关闭 MCP 服务器
+	// 优雅关闭服务器
 	if err := httpServer.Shutdown(ctx); err != nil {
-		log.Fatalf("MCP 服务器关闭错误: %v", err)
-	}
-
-	// 优雅关闭静态文件服务器
-	if err := staticSrv.Shutdown(ctx); err != nil {
-		log.Fatalf("静态文件服务器关闭错误: %v", err)
+		log.Fatalf("服务器关闭错误: %v", err)
 	}
 
 	log.Info("服务器已成功关闭")
@@ -212,8 +204,8 @@ func GenerateEchartsPage(ctx context.Context, request mcp.CallToolRequest) (*mcp
 	}
 
 	// 返回结果 URL
-	staticPort := getEnv("STATIC_PORT", "8988")
-	publicURL := getEnv("PUBLIC_URL", fmt.Sprintf("http://localhost:%s", staticPort))
+	port := getEnv("PORT", "8989")
+	publicURL := getEnv("PUBLIC_URL", fmt.Sprintf("http://localhost:%s", port))
 	// 确保 publicURL 没有尾部斜杠
 	publicURL = strings.TrimSuffix(publicURL, "/")
 

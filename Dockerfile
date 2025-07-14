@@ -41,11 +41,9 @@ USER nobody:nogroup
 # 暴露应用端口（默认 8989）
 # 这个端口可以通过 PORT 环境变量在运行时覆盖
 EXPOSE 8989
-EXPOSE 8988
 
 # 设置默认环境变量
 ENV PORT=8989
-ENV STATIC_PORT=8988
 ENV LOG_LEVEL=info
 ENV STATIC_DIR=/app/static
 ENV PUBLIC_URL="http://localhost:8989"

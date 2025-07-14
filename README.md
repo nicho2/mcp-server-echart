@@ -36,8 +36,8 @@ cp .env.example .env
 
 `.env` 文件包含以下配置项：
 
-- `PORT`: 服务监听的端口 (默认: `8989`)
-- `PUBLIC_URL`: 对外暴露的 URL 根路径 (例如 `http://localhost:8989` 或 `https://your.domain.com`)
+- `PORT`: 服务监听的端口，同时提供MCP协议和静态文件服务 (默认: `8989`)
+- `PUBLIC_URL`: 服务的公开访问URL (默认: `http://localhost:8989`)
 - `LOG_LEVEL`: 日志级别 (例如 `info`, `debug`)
 - `STATIC_DIR`: 生成的静态 HTML 文件存放的目录 (默认: `static`)
 
@@ -57,7 +57,10 @@ go mod tidy
 go run main.go
 ```
 
-服务启动后，会监听在 `.env` 文件中配置的 `PORT` 端口（默认为 8989）。
+服务启动后，会在单一端口上提供服务：
+- 端口：`.env` 文件中配置的 `PORT`（默认为 8989）
+- MCP 协议：通过 `/mcp` 路径访问
+- 静态文件：通过根路径 `/` 访问
 
 ### 使用 Docker 运行
 
@@ -71,10 +74,10 @@ go run main.go
     # 基础运行
     docker run -p 8989:8989 -d --name my-echart-server mcp-server-echart
 
-    # 自定义端口和对外 URL
+    # 自定义端口
     docker run -p 9090:9090 \
       -e PORT=9090 \
-      -e PUBLIC_URL="https://my.domain.com" \
+      -e PUBLIC_URL="http://localhost:9090" \
       -d --name my-echart-server mcp-server-echart
     ```
 
@@ -99,20 +102,20 @@ go run main.go
 
 ## 💻 如何使用
 
-本服务可以通过任何支持 Server-Sent Events (SSE) 的 MCP 客户端进行调用。
+本服务可以通过任何支持 StreamableHTTP 协议的 MCP 客户端进行调用。
 
 ### 客户端配置
 
 如果您使用的 MCP 客户端支持通过配置文件连接到服务器，您可以添加如下配置来连接到本服务。
 
-请将 `mcp-server-echart` 添加到您的客户端配置中，并将 URL 指向本服务的监听地址（默认为 `http://localhost:8989/sse`）。
+请将 `mcp-server-echart` 添加到您的客户端配置中，并将 URL 指向本服务的监听地址（默认为 `http://localhost:8989/mcp`）。
 
 **示例配置 (`client-config.json`):**
 ```json
 {
   "mcpServers": {
     "mcp-server-echart": {
-      "url": "http://localhost:8989/sse"
+      "url": "http://localhost:8989/mcp"
     }
   }
 }
@@ -123,15 +126,16 @@ go run main.go
 {
   "mcpServers": {
     "browser-use-mcp-server": {
-      "url": "http://localhost:8000/sse"
+      "url": "http://localhost:8000/mcp"
     }
   }
 }
 ```
 
 > **注意**:
-> - URL 应与您在 `.env` 文件中配置的 `PORT` 和 `PUBLIC_URL` 保持一致。
-> - `mcp-go` 工具调用的默认端点是 `/sse`，而不是 `/`。
+> - URL 应与您在 `.env` 文件中配置的 `PORT` 保持一致。
+> - StreamableHTTP 协议的默认端点是 `/mcp`。
+> - 服务现在在单一端口上同时提供 MCP 协议和静态文件服务。
 
 ### 客户端配置 (通过 Docker 命令)
 
@@ -162,7 +166,7 @@ go run main.go
 }
 ```
 > **注意**:
-> - `-p 8989:8989` 将容器的 8989 端口映射到主机的 8989 端口，以便您可以从浏览器访问生成的图表。
+> - `-p 8989:8989` 将容器的服务端口映射到主机，用于 MCP 协议通信和访问生成的图表页面。
 > - `cnkanwei/mcp-server-echart:latest` 是发布在 Docker Hub 上的公共镜像。
 
 ---
