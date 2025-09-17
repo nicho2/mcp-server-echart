@@ -38,12 +38,15 @@ RUN mkdir -p /app/static/charts && \
 # Switch to a non-root user for better security
 USER nobody:nogroup
 
-# Expose the application port (default 8989)
+# Expose the MCP/static server port (default 8989)
 # The PORT environment variable can override this at runtime
 EXPOSE 8989
+# Expose the REST API port (default 8990)
+EXPOSE 8990
 
 # Provide default environment variables
 ENV PORT=8989
+ENV API_PORT=8990
 ENV LOG_LEVEL=info
 ENV STATIC_DIR=/app/static
 ENV PUBLIC_URL="http://localhost:8989"
