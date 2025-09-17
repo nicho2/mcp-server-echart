@@ -1,52 +1,52 @@
 # ---- Build Stage ----
-# 使用官方的 Go 镜像作为构建环境
+# Use the official Go image as the build environment
 FROM golang:1.24-alpine AS builder
 
-# 设置工作目录
+# Set the working directory
 WORKDIR /app
 
-# 预先复制 go.mod 和 go.sum 文件，以便利用 Docker 的缓存机制
+# Copy go.mod and go.sum first to leverage Docker layer caching
 COPY go.mod go.sum ./
 RUN go mod download
 
-# 复制所有源代码
+# Copy the entire source tree
 COPY . .
 
-# 编译应用，-ldflags "-w -s" 用于减小可执行文件大小
-# CGO_ENABLED=0 确保静态链接，以便在 alpine 这种最小化镜像中运行
+# Build the application; -ldflags "-w -s" reduces the binary size
+# CGO_ENABLED=0 ensures a static binary suitable for minimal images like Alpine
 RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /app/mcp-server-echart .
 
 # ---- Final Stage ----
-# 使用一个非常小的基础镜像
+# Use a minimal base image
 FROM alpine:latest
 
-# 设置工作目录
+# Set the working directory
 WORKDIR /app
 
-# 从 builder 阶段复制编译好的可执行文件
+# Copy the compiled binary from the builder stage
 COPY --from=builder /app/mcp-server-echart /app/mcp-server-echart
 
-# 复制模板文件和静态资源目录
-# 注意：这里我们假设 static 目录可能在运行时创建，但 template.html 是必须的
+# Copy the template file and static assets directory
+# Note: the static directory may be created at runtime, but template.html is required
 COPY template.html ./
 
-# 创建静态文件目录，并确保其权限正确
+# Create the static directory and set safe permissions
 RUN mkdir -p /app/static/charts && \
     chown -R nobody:nogroup /app && \
     chmod -R 755 /app
     
-# 切换到非 root 用户以增强安全性
+# Switch to a non-root user for better security
 USER nobody:nogroup
 
-# 暴露应用端口（默认 8989）
-# 这个端口可以通过 PORT 环境变量在运行时覆盖
+# Expose the application port (default 8989)
+# The PORT environment variable can override this at runtime
 EXPOSE 8989
 
-# 设置默认环境变量
+# Provide default environment variables
 ENV PORT=8989
 ENV LOG_LEVEL=info
 ENV STATIC_DIR=/app/static
 ENV PUBLIC_URL="http://localhost:8989"
 
-# 运行应用
+# Run the application
 CMD ["/app/mcp-server-echart"] 

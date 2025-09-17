@@ -36,12 +36,12 @@ type PageData struct {
 }
 
 func init() {
-	// 从 .env 文件加载环境变量（如果存在）
+	// Load environment variables from .env if present
 	if err := godotenv.Load(); err != nil {
-		log.Info("未找到 .env 文件，将使用默认值或系统环境变量")
+		log.Info("No .env file found; using defaults or system environment variables")
 	}
 
-	// 初始化日志配置
+	// Initialize logging
 	log.SetFormatter(&log.JSONFormatter{})
 	log.SetOutput(os.Stdout)
 	level, err := log.ParseLevel(os.Getenv("LOG_LEVEL"))
@@ -52,121 +52,121 @@ func init() {
 }
 
 func main() {
-	// 创建 MCP Server
+	// Create the MCP server
 	s := server.NewMCPServer(
-		"ECharts 可视化图表生成服务", // 专业航班查询MCP服务
-		"1.0.0",             // 版本号
+		"ECharts Visualization Page Service", // MCP service for generating ECharts pages
+		"1.0.0",                              // Version number
 	)
 
-	// 注册 generate_echarts_page 工具
+	// Register the generate_echarts_page tool
 	generateEchartsPage := mcp.NewTool("generate_echarts_page",
-		mcp.WithDescription("根据 ECharts 的 JSON 配置生成一个 HTML 图表页面"),
+		mcp.WithDescription("Generate an HTML chart page from an ECharts JSON configuration"),
 		mcp.WithObject("inputSchema",
-			mcp.Description("ECharts 的 JSON 配置对象"),
+			mcp.Description("ECharts JSON configuration object"),
 			mcp.Required(),
 		),
 		mcp.WithString("title",
-			mcp.Description("图表页面的标题"),
+			mcp.Description("Title of the chart page"),
 			mcp.Required(),
 		),
 		mcp.WithNumber("width",
-			mcp.Description("图表的宽度（像素）"),
+			mcp.Description("Width of the chart in pixels"),
 		),
 		mcp.WithNumber("height",
-			mcp.Description("图表的高度（像素）"),
+			mcp.Description("Height of the chart in pixels"),
 		),
 	)
 	s.AddTool(generateEchartsPage, GenerateEchartsPage)
 
-	// 确保静态文件目录存在
+	// Ensure the static directory exists
 	staticDir := getEnv("STATIC_DIR", "static")
 	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(staticDir, 0755); err != nil {
-			log.Fatalf("创建静态目录失败: %v", err)
+			log.Fatalf("Failed to create the static directory: %v", err)
 		}
 	}
 
-	// 获取端口配置
+	// Read the port configuration
 	port := getEnv("PORT", "8989")
 
-	// 创建统一的 HTTP 路由器
+	// Create a unified HTTP router
 	mux := http.NewServeMux()
-	
-	// 添加静态文件服务器
+
+	// Serve static files
 	mux.Handle("/", http.FileServer(http.Dir(staticDir)))
-	
-	// 创建 MCP HTTP 服务器
+
+	// Create the MCP HTTP server
 	mcpHandler := server.NewStreamableHTTPServer(s,
 		server.WithEndpointPath("/mcp"),
 		server.WithSessionIdManager(&server.InsecureStatefulSessionIdManager{}),
 		server.WithHeartbeatInterval(5*time.Second),
 		server.WithLogger(log.StandardLogger()),
 	)
-	
-	// 添加 MCP 处理器到路由器
+
+	// Register the MCP handler with the router
 	mux.Handle("/mcp", mcpHandler)
 
-	// 创建统一的 HTTP 服务器
+	// Build the shared HTTP server
 	httpServer := &http.Server{
 		Addr:    ":" + port,
 		Handler: mux,
 	}
 
-	// 启动统一的 HTTP 服务器
+	// Start the HTTP server
 	go func() {
-		log.Infof("服务器正在启动，监听端口: %s (MCP协议: /mcp, 静态文件: /)", port)
+		log.Infof("Server starting on port %s (MCP endpoint: /mcp, static files: /)", port)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("服务器启动失败: %v\n", err)
+			log.Fatalf("Server failed to start: %v\n", err)
 		}
 	}()
 
-	// 设置优雅退出
+	// Configure graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Info("正在关闭服务器...")
+	log.Info("Shutting down the server...")
 
-	// 创建带超时的上下文用于关闭服务器
+	// Create a shutdown context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// 优雅关闭服务器
+	// Gracefully shut down the server
 	if err := httpServer.Shutdown(ctx); err != nil {
-		log.Fatalf("服务器关闭错误: %v", err)
+		log.Fatalf("Server shutdown error: %v", err)
 	}
 
-	log.Info("服务器已成功关闭")
+	log.Info("Server shut down successfully")
 }
 
 func GenerateEchartsPage(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// 使用辅助函数安全地获取参数
+	// Safely extract parameters
 	args := request.GetArguments()
 
 	inputSchema, ok := args["inputSchema"].(map[string]interface{})
 	if !ok {
-		return mcp.NewToolResultError("参数 'inputSchema' 必须是一个 JSON 对象"), nil
+		return mcp.NewToolResultError("Parameter 'inputSchema' must be a JSON object"), nil
 	}
 
 	title, ok := args["title"].(string)
 	if !ok {
-		return mcp.NewToolResultError("参数 'title' 必须是字符串"), nil
+		return mcp.NewToolResultError("Parameter 'title' must be a string"), nil
 	}
 
-	// GetInt 会自动处理类型转换，并在 key 不存在时返回默认值
+	// GetInt handles type conversions and supplies defaults when the key is missing
 	width := request.GetInt("width", 1000)
 	height := request.GetInt("height", 600)
 
-	// 将 inputSchema 编码为 JSON 字符串
+	// Encode inputSchema as a JSON string
 	optionBytes, err := json.Marshal(inputSchema)
 	if err != nil {
-		return mcp.NewToolResultError("无法序列化 inputSchema: " + err.Error()), nil
+		return mcp.NewToolResultError("Failed to serialize inputSchema: " + err.Error()), nil
 	}
 
-	// 准备用于显示和注入的数据
+	// Prepare formatted JSON for display and injection
 	var prettyJSON bytes.Buffer
 	if err := json.Indent(&prettyJSON, optionBytes, "", "  "); err != nil {
-		log.Warnf("无法格式化JSON: %v", err)
+		log.Warnf("Failed to format JSON: %v", err)
 		prettyJSON.WriteString(string(optionBytes)) // Fallback to raw string
 	}
 
@@ -178,35 +178,35 @@ func GenerateEchartsPage(ctx context.Context, request mcp.CallToolRequest) (*mcp
 		OptionStr: prettyJSON.String(),
 	}
 
-	// 解析并执行模板
+	// Parse and execute the template
 	tmpl, err := template.New("echarts").Parse(getTemplate())
 	if err != nil {
-		return mcp.NewToolResultError("模板解析失败: " + err.Error()), nil
+		return mcp.NewToolResultError("Template parsing failed: " + err.Error()), nil
 	}
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return mcp.NewToolResultError("模板执行失败: " + err.Error()), nil
+		return mcp.NewToolResultError("Template execution failed: " + err.Error()), nil
 	}
 
-	// 保存 HTML 文件到 static/charts 目录
+	// Save the HTML file into static/charts
 	staticDir := getEnv("STATIC_DIR", "static")
 	chartsDir := filepath.Join(staticDir, "charts")
 	if err := os.MkdirAll(chartsDir, 0755); err != nil {
-		return mcp.NewToolResultError("创建charts目录失败: " + err.Error()), nil
+		return mcp.NewToolResultError("Failed to create charts directory: " + err.Error()), nil
 	}
 
 	fileName := fmt.Sprintf("echarts_%d.html", time.Now().UnixNano())
 	filePath := filepath.Join(chartsDir, fileName)
 
 	if err := os.WriteFile(filePath, buf.Bytes(), 0644); err != nil {
-		return mcp.NewToolResultError("保存 HTML 文件失败: " + err.Error()), nil
+		return mcp.NewToolResultError("Failed to save HTML file: " + err.Error()), nil
 	}
 
-	// 返回结果 URL
+	// Build the result URL
 	port := getEnv("PORT", "8989")
 	publicURL := getEnv("PUBLIC_URL", fmt.Sprintf("http://localhost:%s", port))
-	// 确保 publicURL 没有尾部斜杠
+	// Ensure publicURL has no trailing slash
 	publicURL = strings.TrimSuffix(publicURL, "/")
 
 	resultURL := fmt.Sprintf("%s/charts/%s", publicURL, fileName)
@@ -214,16 +214,16 @@ func GenerateEchartsPage(ctx context.Context, request mcp.CallToolRequest) (*mcp
 }
 
 func getTemplate() string {
-	// 优先从文件读取，方便开发时热重载
+	// Prefer reading from the file system to support live reload during development
 	data, err := os.ReadFile("template.html")
 	if err == nil {
 		return string(data)
 	}
-	// 如果文件读取失败（例如在部署环境中），使用 embed 的模板
+	// Fallback to the embedded template if reading the file fails (for example, in a deployment environment)
 	return htmlTemplate
 }
 
-// getEnv 读取环境变量，如果不存在则返回默认值
+// getEnv reads an environment variable or returns the fallback
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
 		return value
@@ -231,7 +231,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// getEnvAsInt 读取环境变量并解析为整数，如果不存在或解析失败则返回默认值
+// getEnvAsInt reads an environment variable as an integer or returns the fallback when parsing fails
 func getEnvAsInt(name string, fallback int) int {
 	valueStr := getEnv(name, "")
 	if value, err := strconv.Atoi(valueStr); err == nil {
