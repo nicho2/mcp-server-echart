@@ -1,0 +1,116 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "mcp-server-echart REST API",
+    "version": "1.0.0",
+    "description": "HTTP API mirroring the GenerateEchartsPage MCP tool."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8990",
+      "description": "Default local REST API server"
+    }
+  ],
+  "paths": {
+    "/api/GenerateEchartsPage": {
+      "post": {
+        "summary": "Generate an ECharts HTML page",
+        "description": "Creates an HTML page using the same parameters as the MCP tool.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateEchartsPageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "URL for the generated chart page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateEchartsPageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error while generating the page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "GenerateEchartsPageRequest": {
+        "type": "object",
+        "required": ["title", "inputSchema"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Title of the chart page"
+          },
+          "inputSchema": {
+            "type": "object",
+            "description": "ECharts JSON configuration"
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Width of the chart in pixels",
+            "default": 1000
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Height of the chart in pixels",
+            "default": 600
+          }
+        },
+        "additionalProperties": false
+      },
+      "GenerateEchartsPageResponse": {
+        "type": "object",
+        "required": ["url"],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL of the generated chart page"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Description of the error"
+          }
+        }
+      }
+    }
+  }
+}
