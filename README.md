@@ -60,18 +60,21 @@ go run main.go
 ```
 
 After the service starts it exposes everything on a single port:
+
 - Port: `PORT` from the `.env` file (defaults to 8989).
 - MCP protocol: Available at the `/mcp` path.
 - Static files: Available from the root `/` path.
 
 ### Run with Docker
 
-1.  **Build the Docker image:**
+1. **Build the Docker image:**
+
     ```bash
     docker build -t mcp-server-echart .
     ```
 
-2.  **Run the Docker container:**
+2. **Run the Docker container:**
+
     ```bash
     # Basic usage
     docker run -p 8989:8989 -d --name my-echart-server mcp-server-echart
@@ -137,6 +140,7 @@ Add `mcp-server-echart` to your client configuration and point the URL to the se
 ```
 
 > **Notes:**
+>
 > - The URL must match the `PORT` configured in your `.env` file.
 > - The default endpoint for the StreamableHTTP protocol is `/mcp`.
 > - The service hosts both the MCP endpoint and static files on the same port.
@@ -172,6 +176,7 @@ This workflow is convenient for local development or sharing the service with ot
 ```
 
 > **Notes:**
+>
 > - `-p 8989:8989` maps the container port to the host for both MCP traffic and access to generated chart pages.
 > - `cnkanwei/mcp-server-echart:latest` is the public image published on Docker Hub.
 
