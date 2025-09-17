@@ -26,6 +26,9 @@ import (
 //go:embed template.html
 var htmlTemplate string
 
+//go:embed docs/swagger.json
+var swaggerSpec []byte
+
 // PageData holds data for the HTML template
 type PageData struct {
 	Title     string
@@ -34,6 +37,34 @@ type PageData struct {
 	Option    template.JS
 	OptionStr string
 }
+
+// GenerateEchartsPageParams represents the validated parameters required
+// to render and persist an ECharts page.
+type GenerateEchartsPageParams struct {
+	Title       string
+	InputSchema map[string]interface{}
+	Width       int
+	Height      int
+}
+
+// GenerateEchartsPageRequest models the REST API request body for
+// generating an ECharts page.
+type GenerateEchartsPageRequest struct {
+	Title       string                 `json:"title"`
+	InputSchema map[string]interface{} `json:"inputSchema"`
+	Width       *int                   `json:"width,omitempty"`
+	Height      *int                   `json:"height,omitempty"`
+}
+
+// GenerateEchartsPageResponse represents the REST API response body on success.
+type GenerateEchartsPageResponse struct {
+	URL string `json:"url"`
+}
+
+const (
+	defaultChartWidth  = 1000
+	defaultChartHeight = 600
+)
 
 func init() {
 	// Load environment variables from .env if present
@@ -112,6 +143,17 @@ func main() {
 		Handler: mux,
 	}
 
+	// Configure the REST API server
+	apiPort := getEnv("API_PORT", "8990")
+	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("/api/GenerateEchartsPage", handleGenerateEchartsPageAPI)
+	apiMux.HandleFunc("/swagger.json", swaggerSpecHandler)
+	apiMux.HandleFunc("/docs", swaggerUIHandler("/swagger.json"))
+	apiServer := &http.Server{
+		Addr:    ":" + apiPort,
+		Handler: apiMux,
+	}
+
 	// Start the HTTP server
 	go func() {
 		log.Infof("Server starting on port %s (MCP endpoint: /mcp, static files: /)", port)
@@ -120,23 +162,35 @@ func main() {
 		}
 	}()
 
+	// Start the REST API server
+	go func() {
+		log.Infof("REST API server starting on port %s (Swagger UI: /docs)", apiPort)
+		if err := apiServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("REST API server failed to start: %v\n", err)
+		}
+	}()
+
 	// Configure graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Info("Shutting down the server...")
+	log.Info("Shutting down the servers...")
 
 	// Create a shutdown context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Gracefully shut down the server
+	// Gracefully shut down the servers
 	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Fatalf("Server shutdown error: %v", err)
 	}
 
-	log.Info("Server shut down successfully")
+	if err := apiServer.Shutdown(ctx); err != nil {
+		log.Fatalf("REST API server shutdown error: %v", err)
+	}
+
+	log.Info("Servers shut down successfully")
 }
 
 func GenerateEchartsPage(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -154,24 +208,58 @@ func GenerateEchartsPage(ctx context.Context, request mcp.CallToolRequest) (*mcp
 	}
 
 	// GetInt handles type conversions and supplies defaults when the key is missing
-	width := request.GetInt("width", 1000)
-	height := request.GetInt("height", 600)
+	width := request.GetInt("width", defaultChartWidth)
+	height := request.GetInt("height", defaultChartHeight)
+
+	params := GenerateEchartsPageParams{
+		Title:       title,
+		InputSchema: inputSchema,
+		Width:       width,
+		Height:      height,
+	}
+
+	resultURL, err := renderAndPersistEchartsPage(params)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return mcp.NewToolResultText(resultURL), nil
+}
+
+func renderAndPersistEchartsPage(params GenerateEchartsPageParams) (string, error) {
+	if params.InputSchema == nil {
+		return "", fmt.Errorf("Parameter 'inputSchema' must be a JSON object")
+	}
+
+	if params.Title == "" {
+		return "", fmt.Errorf("Parameter 'title' must be a string")
+	}
+
+	width := params.Width
+	if width == 0 {
+		width = defaultChartWidth
+	}
+
+	height := params.Height
+	if height == 0 {
+		height = defaultChartHeight
+	}
 
 	// Encode inputSchema as a JSON string
-	optionBytes, err := json.Marshal(inputSchema)
+	optionBytes, err := json.Marshal(params.InputSchema)
 	if err != nil {
-		return mcp.NewToolResultError("Failed to serialize inputSchema: " + err.Error()), nil
+		return "", fmt.Errorf("Failed to serialize inputSchema: %w", err)
 	}
 
 	// Prepare formatted JSON for display and injection
 	var prettyJSON bytes.Buffer
 	if err := json.Indent(&prettyJSON, optionBytes, "", "  "); err != nil {
 		log.Warnf("Failed to format JSON: %v", err)
-		prettyJSON.WriteString(string(optionBytes)) // Fallback to raw string
+		prettyJSON.Write(optionBytes)
 	}
 
 	data := PageData{
-		Title:     title,
+		Title:     params.Title,
 		Width:     width,
 		Height:    height,
 		Option:    template.JS(prettyJSON.String()),
@@ -181,36 +269,143 @@ func GenerateEchartsPage(ctx context.Context, request mcp.CallToolRequest) (*mcp
 	// Parse and execute the template
 	tmpl, err := template.New("echarts").Parse(getTemplate())
 	if err != nil {
-		return mcp.NewToolResultError("Template parsing failed: " + err.Error()), nil
+		return "", fmt.Errorf("Template parsing failed: %w", err)
 	}
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return mcp.NewToolResultError("Template execution failed: " + err.Error()), nil
+		return "", fmt.Errorf("Template execution failed: %w", err)
 	}
 
 	// Save the HTML file into static/charts
 	staticDir := getEnv("STATIC_DIR", "static")
 	chartsDir := filepath.Join(staticDir, "charts")
 	if err := os.MkdirAll(chartsDir, 0755); err != nil {
-		return mcp.NewToolResultError("Failed to create charts directory: " + err.Error()), nil
+		return "", fmt.Errorf("Failed to create charts directory: %w", err)
 	}
 
 	fileName := fmt.Sprintf("echarts_%d.html", time.Now().UnixNano())
 	filePath := filepath.Join(chartsDir, fileName)
 
 	if err := os.WriteFile(filePath, buf.Bytes(), 0644); err != nil {
-		return mcp.NewToolResultError("Failed to save HTML file: " + err.Error()), nil
+		return "", fmt.Errorf("Failed to save HTML file: %w", err)
 	}
 
 	// Build the result URL
 	port := getEnv("PORT", "8989")
 	publicURL := getEnv("PUBLIC_URL", fmt.Sprintf("http://localhost:%s", port))
-	// Ensure publicURL has no trailing slash
 	publicURL = strings.TrimSuffix(publicURL, "/")
 
 	resultURL := fmt.Sprintf("%s/charts/%s", publicURL, fileName)
-	return mcp.NewToolResultText(resultURL), nil
+	return resultURL, nil
+}
+
+func handleGenerateEchartsPageAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			log.Warnf("Failed to close request body: %v", err)
+		}
+	}()
+
+	var req GenerateEchartsPageRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+		return
+	}
+
+	if req.Title == "" {
+		respondWithError(w, http.StatusBadRequest, "Parameter 'title' must be a non-empty string")
+		return
+	}
+
+	if req.InputSchema == nil {
+		respondWithError(w, http.StatusBadRequest, "Parameter 'inputSchema' must be an object")
+		return
+	}
+
+	width := defaultChartWidth
+	if req.Width != nil {
+		width = *req.Width
+	}
+
+	height := defaultChartHeight
+	if req.Height != nil {
+		height = *req.Height
+	}
+
+	params := GenerateEchartsPageParams{
+		Title:       req.Title,
+		InputSchema: req.InputSchema,
+		Width:       width,
+		Height:      height,
+	}
+
+	resultURL, err := renderAndPersistEchartsPage(params)
+	if err != nil {
+		log.Errorf("Failed to generate ECharts page via REST API: %v", err)
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, GenerateEchartsPageResponse{URL: resultURL})
+}
+
+func swaggerSpecHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write(swaggerSpec); err != nil {
+		log.Errorf("Failed to write swagger specification: %v", err)
+	}
+}
+
+func swaggerUIHandler(swaggerEndpoint string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>mcp-server-echart API Documentation</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin="anonymous"></script>
+    <script>
+      window.onload = () => {
+        window.ui = SwaggerUIBundle({
+          url: '%s',
+          dom_id: '#swagger-ui',
+          presets: [SwaggerUIBundle.presets.apis],
+        });
+      };
+    </script>
+  </body>
+</html>`, swaggerEndpoint)
+
+		if _, err := fmt.Fprint(w, html); err != nil {
+			log.Errorf("Failed to write swagger UI response: %v", err)
+		}
+	}
+}
+
+func respondWithJSON(w http.ResponseWriter, status int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		log.Errorf("Failed to encode JSON response: %v", err)
+	}
+}
+
+func respondWithError(w http.ResponseWriter, status int, message string) {
+	respondWithJSON(w, status, map[string]string{"error": message})
 }
 
 func getTemplate() string {

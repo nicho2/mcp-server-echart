@@ -11,6 +11,7 @@ A Go service built with the `mcp-go` framework that provides a tool for dynamica
 - **Modern page layout**: Generated chart pages feature a clean, modern design.
 - **Docker support**: Includes a `Dockerfile` for building lightweight, portable Docker images.
 - **Flexible configuration**: Configure the service with environment variables or a `.env` file to fit different environments.
+- **REST API access**: Trigger chart generation with a POST request and explore the contract through an integrated Swagger UI.
 
 ---
 
@@ -39,6 +40,7 @@ cp .env.example .env
 The `.env` file supports the following settings:
 
 - `PORT`: The port for both MCP requests and static file hosting (default: `8989`).
+- `API_PORT`: The port for the REST API exposing `/api/GenerateEchartsPage` and `/docs` (default: `8990`).
 - `PUBLIC_URL`: The public URL of the service (default: `http://localhost:8989`).
 - `LOG_LEVEL`: Logging level (for example `info`, `debug`).
 - `STATIC_DIR`: Directory for generated static HTML files (default: `static`).
@@ -59,11 +61,10 @@ go mod tidy
 go run main.go
 ```
 
-After the service starts it exposes everything on a single port:
+After the service starts it exposes two HTTP entry points:
 
-- Port: `PORT` from the `.env` file (defaults to 8989).
-- MCP protocol: Available at the `/mcp` path.
-- Static files: Available from the root `/` path.
+- Port `PORT` (defaults to 8989): hosts the MCP endpoint at `/mcp` and the static files at `/`.
+- Port `API_PORT` (defaults to 8990): hosts the REST endpoint at `/api/GenerateEchartsPage` and the Swagger UI at `/docs`.
 
 ### Run with Docker
 
@@ -102,6 +103,35 @@ The service exposes a tool named `generate_echarts_page`.
 ### Return value
 
 On success the tool responds with a URL pointing to the generated chart page.
+
+---
+
+## 🌐 REST API
+
+The REST server exposes the same functionality on `POST /api/GenerateEchartsPage`.
+
+**Request body**
+
+```json
+{
+  "title": "Quarterly conversion rate",
+  "inputSchema": { "series": [{ "type": "bar", "data": [12, 18, 22] }] },
+  "width": 960,
+  "height": 540
+}
+```
+
+**Successful response**
+
+```json
+{
+  "url": "http://localhost:8989/charts/echarts_1700000000000000000.html"
+}
+```
+
+If the payload is invalid the API returns a 400 status code with a JSON error message; unexpected failures yield a 500 status code.
+
+You can explore and test the REST API interactively from the integrated Swagger UI available at `http://localhost:8990/docs`.
 
 ---
 
