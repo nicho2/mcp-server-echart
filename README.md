@@ -110,7 +110,7 @@ On success the tool responds with a URL pointing to the generated chart page.
 
 The REST server exposes the same functionality on `POST /api/GenerateEchartsPage`.
 
-**Request body**
+**Request body**:
 
 ```json
 {
@@ -121,7 +121,7 @@ The REST server exposes the same functionality on `POST /api/GenerateEchartsPage
 }
 ```
 
-**Successful response**
+**Successful response**:
 
 ```json
 {
