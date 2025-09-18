@@ -197,9 +197,21 @@ func GenerateEchartsPage(ctx context.Context, request mcp.CallToolRequest) (*mcp
 	// Safely extract parameters
 	args := request.GetArguments()
 
-	inputSchema, ok := args["inputSchema"].(map[string]interface{})
-	if !ok {
-		return mcp.NewToolResultError("Parameter 'inputSchema' must be a JSON object"), nil
+	rawInputSchema, exists := args["inputSchema"]
+	if !exists {
+		return mcp.NewToolResultError("Parameter 'inputSchema' must be provided"), nil
+	}
+
+	var inputSchema map[string]interface{}
+	switch value := rawInputSchema.(type) {
+	case map[string]interface{}:
+		inputSchema = value
+	case string:
+		if err := json.Unmarshal([]byte(value), &inputSchema); err != nil {
+			return mcp.NewToolResultError("Parameter 'inputSchema' must be a JSON object or JSON string"), nil
+		}
+	default:
+		return mcp.NewToolResultError("Parameter 'inputSchema' must be a JSON object or JSON string"), nil
 	}
 
 	title, ok := args["title"].(string)
