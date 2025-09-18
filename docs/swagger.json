@@ -7,8 +7,8 @@
   },
   "servers": [
     {
-      "url": "http://localhost:8990",
-      "description": "Default local REST API server"
+      "url": "/",
+      "description": "Use the same host and port serving the Swagger UI"
     }
   ],
   "paths": {
