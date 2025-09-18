@@ -28,4 +28,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: nicho267mcp-server-echart:latest
+          tags: nicho267/mcp-server-echart:latest
