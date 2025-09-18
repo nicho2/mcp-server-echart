@@ -72,8 +72,16 @@
             "description": "Title of the chart page"
           },
           "inputSchema": {
-            "type": "object",
-            "description": "ECharts JSON configuration"
+            "description": "ECharts JSON configuration",
+            "oneOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "string",
+                "description": "Serialized ECharts JSON configuration"
+              }
+            ]
           },
           "width": {
             "type": "integer",

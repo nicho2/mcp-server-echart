@@ -50,10 +50,10 @@ type GenerateEchartsPageParams struct {
 // GenerateEchartsPageRequest models the REST API request body for
 // generating an ECharts page.
 type GenerateEchartsPageRequest struct {
-	Title       string                 `json:"title"`
-	InputSchema map[string]interface{} `json:"inputSchema"`
-	Width       *int                   `json:"width,omitempty"`
-	Height      *int                   `json:"height,omitempty"`
+	Title       string          `json:"title"`
+	InputSchema json.RawMessage `json:"inputSchema"`
+	Width       *int            `json:"width,omitempty"`
+	Height      *int            `json:"height,omitempty"`
 }
 
 // GenerateEchartsPageResponse represents the REST API response body on success.
@@ -64,6 +64,9 @@ type GenerateEchartsPageResponse struct {
 const (
 	defaultChartWidth  = 1000
 	defaultChartHeight = 600
+
+	errInputSchemaRequired = "Parameter 'inputSchema' must be provided"
+	errInputSchemaFormat   = "Parameter 'inputSchema' must be a JSON object or JSON string"
 )
 
 func init() {
@@ -199,19 +202,12 @@ func GenerateEchartsPage(ctx context.Context, request mcp.CallToolRequest) (*mcp
 
 	rawInputSchema, exists := args["inputSchema"]
 	if !exists {
-		return mcp.NewToolResultError("Parameter 'inputSchema' must be provided"), nil
+		return mcp.NewToolResultError(errInputSchemaRequired), nil
 	}
 
-	var inputSchema map[string]interface{}
-	switch value := rawInputSchema.(type) {
-	case map[string]interface{}:
-		inputSchema = value
-	case string:
-		if err := json.Unmarshal([]byte(value), &inputSchema); err != nil {
-			return mcp.NewToolResultError("Parameter 'inputSchema' must be a JSON object or JSON string"), nil
-		}
-	default:
-		return mcp.NewToolResultError("Parameter 'inputSchema' must be a JSON object or JSON string"), nil
+	inputSchema, err := normalizeInputSchema(rawInputSchema)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 
 	title, ok := args["title"].(string)
@@ -236,6 +232,48 @@ func GenerateEchartsPage(ctx context.Context, request mcp.CallToolRequest) (*mcp
 	}
 
 	return mcp.NewToolResultText(resultURL), nil
+}
+
+func normalizeInputSchema(raw interface{}) (map[string]interface{}, error) {
+	switch value := raw.(type) {
+	case map[string]interface{}:
+		return value, nil
+	case string:
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(value), &parsed); err != nil {
+			return nil, fmt.Errorf(errInputSchemaFormat)
+		}
+		return parsed, nil
+	case json.RawMessage:
+		return normalizeInputSchema([]byte(value))
+	case []byte:
+		trimmed := bytes.TrimSpace(value)
+		if len(trimmed) == 0 {
+			return nil, fmt.Errorf(errInputSchemaRequired)
+		}
+
+		if bytes.Equal(trimmed, []byte("null")) {
+			return nil, fmt.Errorf(errInputSchemaRequired)
+		}
+
+		if trimmed[0] == '{' {
+			var parsed map[string]interface{}
+			if err := json.Unmarshal(trimmed, &parsed); err != nil {
+				return nil, fmt.Errorf(errInputSchemaFormat)
+			}
+			return parsed, nil
+		}
+
+		var str string
+		if err := json.Unmarshal(trimmed, &str); err != nil {
+			return nil, fmt.Errorf(errInputSchemaFormat)
+		}
+		return normalizeInputSchema(str)
+	case nil:
+		return nil, fmt.Errorf(errInputSchemaRequired)
+	default:
+		return nil, fmt.Errorf(errInputSchemaFormat)
+	}
 }
 
 func renderAndPersistEchartsPage(params GenerateEchartsPageParams) (string, error) {
@@ -338,11 +376,6 @@ func handleGenerateEchartsPageAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.InputSchema == nil {
-		respondWithError(w, http.StatusBadRequest, "Parameter 'inputSchema' must be an object")
-		return
-	}
-
 	width := defaultChartWidth
 	if req.Width != nil {
 		width = *req.Width
@@ -353,9 +386,15 @@ func handleGenerateEchartsPageAPI(w http.ResponseWriter, r *http.Request) {
 		height = *req.Height
 	}
 
+	inputSchema, err := normalizeInputSchema(req.InputSchema)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	params := GenerateEchartsPageParams{
 		Title:       req.Title,
-		InputSchema: req.InputSchema,
+		InputSchema: inputSchema,
 		Width:       width,
 		Height:      height,
 	}
