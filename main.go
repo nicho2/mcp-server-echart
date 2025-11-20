@@ -86,6 +86,8 @@ func init() {
 }
 
 func main() {
+	allowedOrigins := parseAllowedOrigins(getEnv("CORS_ALLOWED_ORIGINS", ""))
+
 	// Create the MCP server
 	s := server.NewMCPServer(
 		"ECharts Visualization Page Service", // MCP service for generating ECharts pages
@@ -143,7 +145,7 @@ func main() {
 	// Build the shared HTTP server
 	httpServer := &http.Server{
 		Addr:    ":" + port,
-		Handler: mux,
+		Handler: withCORS(mux, allowedOrigins),
 	}
 
 	// Configure the REST API server
@@ -154,7 +156,7 @@ func main() {
 	apiMux.HandleFunc("/docs", swaggerUIHandler("/swagger.json"))
 	apiServer := &http.Server{
 		Addr:    ":" + apiPort,
-		Handler: apiMux,
+		Handler: withCORS(apiMux, allowedOrigins),
 	}
 
 	// Start the HTTP server
@@ -457,6 +459,54 @@ func respondWithJSON(w http.ResponseWriter, status int, payload interface{}) {
 
 func respondWithError(w http.ResponseWriter, status int, message string) {
 	respondWithJSON(w, status, map[string]string{"error": message})
+}
+
+func withCORS(handler http.Handler, allowedOrigins []string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" && isOriginAllowed(origin, allowedOrigins) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		}
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		handler.ServeHTTP(w, r)
+	})
+}
+
+func parseAllowedOrigins(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	var origins []string
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			origins = append(origins, trimmed)
+		}
+	}
+
+	return origins
+}
+
+func isOriginAllowed(origin string, allowedOrigins []string) bool {
+	if len(allowedOrigins) == 0 {
+		return false
+	}
+
+	for _, allowed := range allowedOrigins {
+		if allowed == "*" || strings.EqualFold(allowed, origin) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func getTemplate() string {

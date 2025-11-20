@@ -42,6 +42,7 @@ The `.env` file supports the following settings:
 - `PORT`: The port for both MCP requests and static file hosting (default: `8989`).
 - `API_PORT`: The port for the REST API exposing `/api/GenerateEchartsPage` and `/docs` (default: `8990`).
 - `PUBLIC_URL`: The public URL of the service (default: `http://localhost:8989`).
+- `CORS_ALLOWED_ORIGINS`: Comma-separated list of origins allowed to access static pages and REST endpoints (for example `http://10.2.142.66:5173` or `*`).
 - `LOG_LEVEL`: Logging level (for example `info`, `debug`).
 - `STATIC_DIR`: Directory for generated static HTML files (default: `static`).
 
